@@ -19,16 +19,15 @@ def process_frame(frame_path):
     img = cv2.imread(frame_path)
     h, w = img.shape[:2]
     
-    # Máscara en negro
     mask = np.zeros((h, w), dtype=np.uint8)
     
-    # Watermark izquierdo - ALTURA REDUCIDA A LA MITAD
+    # Watermark izquierdo - EXTENDIDO horizontalmente para evitar triángulos
     mask[530:620, 10:440] = 255
     
-    # Watermark derecho - ALTURA REDUCIDA A LA MITAD
+    # Watermark derecho - EXTENDIDO horizontalmente para evitar triángulos
     mask[140:190, 910:1280] = 255
     
-    # Inpaint
+    # Inpaint con TELEA
     result = cv2.inpaint(img, mask, 5, cv2.INPAINT_TELEA)
     cv2.imwrite(frame_path, result)
 
@@ -45,25 +44,20 @@ def remove_watermark(inp, out):
         '-c:v', 'libx264', '-crf', '18', '-preset', 'fast', out
     ], check=True)
     
-    # Limpia frames temp
     for f in frames:
         os.remove(f)
 
 def cleanup_old_files():
-    """Limpia archivos temporales cada 2 horas"""
     while True:
-        time.sleep(7200)  # 2 horas
+        time.sleep(7200)
         try:
-            # Limpia temp
             for f in glob(f'{TEMP}/*'):
                 if os.path.exists(f):
                     os.remove(f)
-            # Limpia outputs viejos (más de 3 horas)
             now = time.time()
             for f in glob(f'{OUTPUT_FOLDER}/*'):
                 if os.path.exists(f) and now - os.path.getmtime(f) > 10800:
                     os.remove(f)
-            # Limpia uploads viejos (más de 3 horas)
             for f in glob(f'{UPLOAD_FOLDER}/*'):
                 if os.path.exists(f) and now - os.path.getmtime(f) > 10800:
                     os.remove(f)
@@ -73,12 +67,25 @@ def cleanup_old_files():
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        file = request.files['file']
-        if not file or not file.filename: return "Error", 400
-        name = secure_filename(file.filename)
-        inp = os.path.join(UPLOAD_FOLDER, name)
+        # Opción 1: Archivo subido
+        if 'file' in request.files and request.files['file'].filename:
+            file = request.files['file']
+            name = secure_filename(file.filename)
+            inp = os.path.join(UPLOAD_FOLDER, name)
+            file.save(inp)
+        # Opción 2: URL
+        elif 'url' in request.form and request.form['url']:
+            url = request.form['url']
+            name = url.split('/')[-1]
+            if not name.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                name = 'video.mp4'
+            inp = os.path.join(UPLOAD_FOLDER, name)
+            # Descarga el video desde el VPS
+            subprocess.run(['wget', '-O', inp, url], check=True)
+        else:
+            return "Error: No file or URL provided", 400
+            
         out = os.path.join(OUTPUT_FOLDER, 'limpio_' + name)
-        file.save(inp)
         jid = str(uuid.uuid4())
         jobs[jid] = {"status": "processing", "out": out}
         
@@ -95,7 +102,37 @@ def index():
         threading.Thread(target=run, daemon=True).start()
         return redirect(url_for("status", job_id=jid))
     
-    return '<h1>Quitar MovieFlow</h1><form method="post" enctype="multipart/form-data"><input type="file" name="file" accept="video/*"><button>Subir</button></form>'
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Quitar MovieFlow</title>
+        <style>
+            body { font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }
+            h1 { color: #e74c3c; }
+            input[type=file], input[type=text] { width: 100%; padding: 10px; margin: 10px 0; }
+            button { width: 100%; padding: 15px; background: #27ae60; color: white; border: none; font-size: 18px; cursor: pointer; }
+            button:hover { background: #229954; }
+            .divider { text-align: center; margin: 20px 0; color: #999; }
+        </style>
+    </head>
+    <body>
+        <h1>🎬 Quitar MovieFlow</h1>
+        <form method="post" enctype="multipart/form-data">
+            <p><strong>Opción 1: Subir archivo</strong></p>
+            <input type="file" name="file" accept="video/*">
+            
+            <div class="divider">── O ──</div>
+            
+            <p><strong>Opción 2: Pegar URL del video</strong></p>
+            <input type="text" name="url" placeholder="https://ejemplo.com/video.mp4">
+            
+            <button type="submit">PROCESAR VIDEO</button>
+        </form>
+    </body>
+    </html>
+    '''
 
 @app.route("/status/<job_id>")
 def status(job_id):
@@ -117,6 +154,5 @@ def get(job_id):
     return send_file(path, as_attachment=True)
 
 if __name__ == "__main__":
-    # Inicia limpieza automática en background
     threading.Thread(target=cleanup_old_files, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
