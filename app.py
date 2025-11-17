@@ -29,7 +29,7 @@ def process_frame(frame_path):
     mask[130:200, 920:1280] = 255
     
     # Inpaint
-    result = cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
+    result = cv2.inpaint(img, mask, 5, cv2.INPAINT_NS)
     cv2.imwrite(frame_path, result)
 
 def remove_watermark(inp, out):
