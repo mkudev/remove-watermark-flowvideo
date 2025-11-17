@@ -23,13 +23,13 @@ def process_frame(frame_path):
     mask = np.zeros((h, w), dtype=np.uint8)
     
     # Watermark izquierdo - ALTURA REDUCIDA A LA MITAD
-    mask[520:630, 20:430] = 255
+    mask[530:620, 10:440] = 255
     
     # Watermark derecho - ALTURA REDUCIDA A LA MITAD
-    mask[130:200, 920:1280] = 255
+    mask[140:190, 910:1280] = 255
     
     # Inpaint
-    result = cv2.inpaint(img, mask, 5, cv2.INPAINT_NS)
+    result = cv2.inpaint(img, mask, 5, cv2.INPAINT_TELEA)
     cv2.imwrite(frame_path, result)
 
 def remove_watermark(inp, out):
